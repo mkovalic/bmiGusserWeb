@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BMI Bucket Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{
+      --bg:#f7f9fc;
+      --card:#fff;
+      --accent:#0d6efd;
+      --border:#d0d7de;
+      --text:#333;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      background:var(--bg);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      color:var(--text);
+      display:flex;justify-content:center;align-items:flex-start;
+      min-height:100vh;padding:2rem 1rem;
+    }
+    .card{
+      background:var(--card);
+      width:min(100%,500px);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:1.75rem 2rem;
+      box-shadow:0 4px 12px rgba(0,0,0,.06);
+      text-align:center;
+    }
+    h1{color:var(--accent);font-size:1.35rem;margin-bottom:1rem}
+    /* --- drop zone --- */
+    .dropzone{
+      border:2px dashed var(--border);
+      border-radius:12px;
+      padding:1.5rem;
+      cursor:pointer;
+      position:relative;
+      transition:background .15s;
+    }
+    .dropzone.dragover{background:#eef4ff}
+    .dropzone p{pointer-events:none;color:#555}
+    .dropzone input[type=file]{
+      position:absolute;inset:0;opacity:0;cursor:pointer
+    }
+    /* preview */
+    #preview{
+      max-width:100%;border-radius:8px;margin-top:1rem;display:none
+    }
+    #result{margin-top:1.25rem;font-size:1.1rem;font-weight:500}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>BMI Bucket Predictor</h1>
+
+    <div class="dropzone" id="dropzone">
+      <p>Drag &amp; drop an image here<br>or click to browse</p>
+      <input type="file" id="fileInput" accept="image/*">
+      <img id="preview">
+    </div>
+
+    <div id="result">Choose or drop a photo to begin.</div>
+  </div>
+
+  <script>
+  /* ---------- CONFIG ---------- */
+  const API_KEY      = '8FaBhntU5FTZbwkr6g78';   // replace / inject for prod
+  const WORKFLOW_URL =
+    'https://serverless.roboflow.com/infer/workflows/whatsmybmi/custom-workflow-3';
+
+  /* ---------- DOM ---------- */
+  const dropzone  = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const preview   = document.getElementById('preview');
+  const resultBox = document.getElementById('result');
+
+  /* ---------- DRAG-AND-DROP HANDLERS ---------- */
+  ['dragenter','dragover'].forEach(evt =>
+    dropzone.addEventListener(evt,e=>{
+      e.preventDefault(); dropzone.classList.add('dragover');
+    })
+  );
+  ['dragleave','dragend','drop'].forEach(evt =>
+    dropzone.addEventListener(evt,()=>dropzone.classList.remove('dragover'))
+  );
+  dropzone.addEventListener('drop',e=>{
+    e.preventDefault();
+    if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+
+  /* ---------- FILE-INPUT CLICK ---------- */
+  fileInput.addEventListener('change',()=>{
+    if(fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  /* ---------- CORE LOGIC ---------- */
+  async function handleFile(file){
+    preview.src = URL.createObjectURL(file);
+    preview.style.display='block';
+    resultBox.textContent='Predicting…';
+
+    try{
+      const b64 = await fileToBase64(file)
+        .then(s=>s.replace(/^data:image\/[a-z]+;base64,/,'')); // strip header
+
+      const res = await fetch(WORKFLOW_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          api_key:API_KEY,
+          inputs:{image:{type:'base64',value:b64}}
+        })
+      });
+      const data = await res.json();
+      console.log('RAW',data); // keep for debugging
+
+      /* ---- pick top-confidence class ---- */
+      const container  = data?.outputs?.[0]?.predictions;
+      const predsObj   = container?.predictions || {};
+      const topEntry   = Object.entries(predsObj)
+        .sort((a,b)=>(b[1].confidence??0)-(a[1].confidence??0))[0];
+
+      if(!topEntry) throw new Error('No predictions returned');
+      const [topClass,info] = topEntry;
+
+      resultBox.textContent =
+        `Predicted: ${topClass.replace(/_/g,' ')}  (${(info.confidence*100).toFixed(1)} % confidence)`;
+
+    }catch(err){
+      console.error(err);
+      resultBox.textContent='Error: '+err.message;
+    }
+  }
+
+  function fileToBase64(file){
+    return new Promise((res,rej)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result);
+      r.onerror=rej;
+      r.readAsDataURL(file);
+    });
+  }
+  </script>
+</body>
+</html>
